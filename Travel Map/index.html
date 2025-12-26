@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Interactive Travel Map</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <!-- TopoJSON -->
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <!-- Custom Styles for Itinerary -->
+    <style>
+        /* Style for generated itinerary content */
+        .itinerary-content h1,
+        .itinerary-content h2,
+        .itinerary-content h3 {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: #67e8f9; /* cyan-300 */
+            margin-top: 0.75rem;
+            margin-bottom: 0.25rem;
+        }
+        .itinerary-content ul,
+        .itinerary-content ol {
+            list-style-position: inside;
+            margin-left: 0.5rem;
+        }
+        .itinerary-content li {
+            margin-bottom: 0.25rem;
+        }
+        .itinerary-content p {
+            margin-bottom: 0.5rem;
+        }
+        
+        /* Styles for radio button labels */
+        input[type="radio"]:checked + .radio-label {
+            background-color: #0e7490; /* cyan-700 */
+            border-color: #06b6d4; /* cyan-500 */
+            font-weight: bold;
+        }
+
+        /* Urban Area Styling */
+        .urban-area {
+            fill: #94a3b8; /* slate-400 */
+            opacity: 0; /* Controlled by JS */
+            pointer-events: none; /* Let clicks pass through to the dots/map */
+            transition: opacity 0.3s ease;
+            stroke: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4 sm:p-6 font-sans">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-7xl">
+        
+        <!-- Header -->
+        <div class="text-center mb-4">
+            <h1 class="text-3xl sm:text-4xl font-bold text-cyan-400">My Interactive Travel Map</h1>
+            <p class="text-gray-400 text-sm sm:text-base">Click a country or use the input to track your travels.</p>
+            <p class="text-xs text-gray-500 mt-1">Sync ID: <span id="user-id">Loading...</span></p>
+        </div>
+
+        <!-- Controls -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-lg mb-4">
+            <!-- First row of controls: Input and primary actions -->
+            <div class="flex flex-col sm:flex-row gap-2 items-center justify-center">
+                <input type="text" id="country-input" placeholder="Enter country or state name (e.g., 'France' or 'AZ')" class="w-full sm:w-1/3 bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                <button id="add-visited" class="w-full sm:w-auto bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Add to Visited</button>
+                <button id="add-wishlist" class="w-full sm:w-auto bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Add to Wishlist</button>
+                <button id="remove-region" class="w-full sm:w-auto bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Remove</button>
+            </div>
+            <!-- Second row of controls: Map/App actions -->
+            <div class="flex flex-col sm:flex-row gap-2 items-center justify-center mt-2">
+                <button id="get-info" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Plan Trip</button>
+                <button id="reset-view" class="w-full sm:w-auto bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Reset View</button>
+            </div>
+        </div>
+        
+        <!-- Main Content Area: Map and Lists -->
+        <div class="flex flex-col lg:flex-row gap-4">
+            
+            <!-- Left Column: Map, Legend, and Info/Itinerary Panels -->
+            <div class="flex-grow lg:w-2/3 flex flex-col gap-4">
+                <!-- Map Container -->
+                <div id="map-container" class="bg-gray-800 rounded-xl shadow-lg h-[60vh] lg:h-[75vh] w-full overflow-hidden border border-gray-700">
+                    <svg id="map" class="w-full h-full"></svg>
+                </div>
+                <!-- Legend -->
+                <div class="flex justify-center gap-4 sm:gap-6 mt-3 text-sm">
+                    <div class="flex items-center"><span class="w-4 h-4 rounded-full bg-green-600 mr-2 border border-gray-900"></span>Visited</div>
+                    <div class="flex items-center"><span class="w-4 h-4 rounded-full bg-yellow-600 mr-2 border border-gray-900"></span>Wishlist</div>
+                    <div class="flex items-center"><span class="w-4 h-4 rounded-full bg-gray-600 mr-2 border border-gray-900"></span>Default</div>
+                    <div class="flex items-center"><span class="w-4 h-4 rounded-full bg-blue-600 mr-2 border border-gray-900"></span>Selected</div>
+                </div>
+
+                <!-- NEW: Notes Panel -->
+                <div id="notes-panel" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden">
+                    <h3 id="notes-location-title" class="text-xl font-bold text-cyan-400 mb-2">Personal Notes</h3>
+                    <textarea id="location-notes" rows="4" placeholder="Enter notes here (e.g., best time to visit, places to see...)" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 mb-2"></textarea>
+                    <button id="save-note-btn" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">Save Note</button>
+                </div>
+
+                <!-- Info Panel -->
+                <div id="info-panel" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden">
+                    <h3 id="info-title" class="text-xl font-bold text-cyan-400 mb-2"></h3>
+                    <p id="info-loading" class="text-gray-400">Loading...</p>
+                    <p id="info-content" class="text-gray-300"></p>
+                    <p id="info-error" class="text-red-400 hidden"></p>
+                    <div id="info-sources" class="mt-2"></div>
+                </div>
+                
+                <!-- Itinerary Panel -->
+                <div id="itinerary-panel" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden">
+                    <h3 class="text-xl font-bold text-cyan-400 mb-3">Create Itinerary</h3>
+                    
+                    <!-- NEW: Starting Point Input -->
+                    <div class="mb-3">
+                        <label for="start-location" class="block text-sm font-medium text-gray-400 mb-1">Starting Point</label>
+                        <input type="text" id="start-location" value="Phoenix (PHX)" placeholder="e.g. New York, JFK, London" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    </div>
+
+                    <!-- Destinations / Route Input -->
+                    <div class="mb-3">
+                        <label for="itinerary-destinations" class="block text-sm font-medium text-gray-400 mb-1">Destinations / Route</label>
+                        <input type="text" id="itinerary-destinations" placeholder="e.g. Phoenix, NV, CA or Italy, France, Spain" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                        <p class="text-xs text-gray-500 mt-1">Edit this to include multiple stops (e.g., "Italy, France, Spain").</p>
+                    </div>
+
+                    <!-- Date Pickers -->
+                    <div class="flex flex-col sm:flex-row gap-2 mb-3">
+                        <div class="flex-1">
+                            <label for="start-date" class="block text-sm font-medium text-gray-400 mb-1">Start Date</label>
+                            <input type="date" id="start-date" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500" style="color-scheme: dark;">
+                        </div>
+                        <div class="flex-1">
+                            <label for="end-date" class="block text-sm font-medium text-gray-400 mb-1">End Date</label>
+                            <input type="date" id="end-date" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500" style="color-scheme: dark;">
+                        </div>
+                    </div>
+                    
+                    <!-- Granular Budget Options -->
+                    <div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+                        <!-- Flight Budget -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Transport</label>
+                            <!-- Mode Selector -->
+                            <select id="transport-mode" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 mb-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm">
+                                <option value="Flight" selected>Flight</option>
+                                <option value="Drive">Drive</option>
+                                <option value="Train">Train</option>
+                                <option value="Cruise">Cruise</option>
+                            </select>
+                            
+                            <!-- Trip Type Selector -->
+                            <div class="flex justify-around gap-2 mb-2" id="trip-type-options">
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="trip-type" value="Round Trip" class="sr-only" checked>
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-2 py-1 border border-gray-600 cursor-pointer transition-colors text-xs">Round Trip</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="trip-type" value="One Way" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-2 py-1 border border-gray-600 cursor-pointer transition-colors text-xs">One Way</span>
+                                </label>
+                            </div>
+
+                            <div class="flex justify-around gap-2" id="transport-budget-options">
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="transport-budget" value="Low" class="sr-only" checked>
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Low</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="transport-budget" value="Medium" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Med</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="transport-budget" value="High" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">High</span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Hotel Budget -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Accommodation</label>
+                            <!-- Type Selector -->
+                            <select id="accommodation-type" class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 mb-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 text-sm">
+                                <option value="Hotel" selected>Hotel</option>
+                                <option value="Motel">Motel</option>
+                                <option value="Airbnb">Airbnb</option>
+                                <option value="Mix">Mix</option>
+                            </select>
+                            <div class="flex justify-around gap-2" id="accommodation-budget-options">
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="accommodation-budget" value="Low" class="sr-only" checked>
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Low</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="accommodation-budget" value="Medium" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Med</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="accommodation-budget" value="High" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">High</span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Food Budget -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Food Budget</label>
+                            <div class="flex justify-around gap-2" id="food-budget-options">
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="food-budget" value="Low" class="sr-only" checked>
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Low</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="food-budget" value="Medium" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Med</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="food-budget" value="High" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">High</span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Other Expenses Budget -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Other Expenses</label>
+                            <div class="flex justify-around gap-2" id="other-budget-options">
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="other-budget" value="Low" class="sr-only" checked>
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Low</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="other-budget" value="Medium" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">Med</span>
+                                </label>
+                                <label class="flex-1 text-center">
+                                    <input type="radio" name="other-budget" value="High" class="sr-only">
+                                    <span class="radio-label block w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 cursor-pointer transition-colors text-sm">High</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <button id="generate-itinerary" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors mb-3 mt-1">Generate Itinerary</button>
+                    <!-- Itinerary Loading/Content -->
+                    <p id="itinerary-loading" class="text-gray-400 hidden">Generating itinerary...</p>
+                    <div id="itinerary-content" class="text-gray-300 itinerary-content max-h-96 overflow-y-auto">
+                        <!-- Generated itinerary will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Lists -->
+            <div class="lg:w-1/3 flex flex-col gap-4">
+                
+                <!-- Visited List -->
+                <div class="bg-gray-800 p-4 rounded-xl shadow-lg h-64 overflow-y-auto">
+                    <h2 id="visited-header" class="text-2xl font-bold text-green-500 mb-2 sticky top-0 bg-gray-800 pb-2">Visited</h2>
+                    <div id="visited-list">
+                        <!-- Content injected by updateLists() -->
+                    </div>
+                </div>
+                
+                <!-- Wishlist List -->
+                <div class="bg-gray-800 p-4 rounded-xl shadow-lg h-64 overflow-y-auto">
+                    <h2 id="wishlist-header" class="text-2xl font-bold text-yellow-500 mb-2 sticky top-0 bg-gray-800 pb-2">Wishlist</h2>
+                    <div id="wishlist-list">
+                        <!-- Content injected by updateLists() -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Message Box -->
+    <div id="message-box" class="hidden fixed top-5 right-5 text-white px-6 py-3 rounded-lg shadow-lg text-sm z-50">
+        Message goes here
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Markdown-it
+        import "https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js";
+
+        // Main app logic - Executed after DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Element References ---
+            const mapSvg = document.getElementById("map");
+            const countryInput = document.getElementById("country-input");
+            const userIdSpan = document.getElementById("user-id");
+            const messageBox = document.getElementById('message-box');
+            const visitedListDiv = document.getElementById('visited-list');
+            const wishlistListDiv = document.getElementById('wishlist-list');
+            const infoPanel = document.getElementById('info-panel');
+            const infoTitle = document.getElementById('info-title');
+            const infoLoading = document.getElementById('info-loading');
+            const infoContent = document.getElementById('info-content');
+            const infoError = document.getElementById('info-error');
+            const infoSources = document.getElementById('info-sources');
+            const itineraryPanel = document.getElementById('itinerary-panel');
+            const itineraryLoading = document.getElementById('itinerary-loading');
+            const itineraryContent = document.getElementById('itinerary-content');
+            const startDateInput = document.getElementById('start-date');
+            const endDateInput = document.getElementById('end-date');
+            const itineraryDestinationsInput = document.getElementById('itinerary-destinations'); // NEW
+            
+            // --- Notes Elements ---
+            const notesPanel = document.getElementById('notes-panel');
+            const notesTitle = document.getElementById('notes-location-title');
+            const notesTextarea = document.getElementById('location-notes');
+            const saveNoteBtn = document.getElementById('save-note-btn');
+            
+            // Initialize Markdown-it
+            const md = window.markdownit();
+
+            // --- App State ---
+            const aliases = {
+                "usa": "united states of america",
+                "united states": "united states of america",
+                "uk": "united kingdom",
+                "columbia": "colombia",
+                "uae": "united arab emirates",
+                "bosnia": "bosnia and herzegovina",
+                "viet nam": "vietnam",
+                "az": "arizona",
+                "tx": "texas",
+                "mi": "michigan",
+                "ca": "california",
+                "ny": "new york",
+                "fl": "florida",
+                "ga": "georgia, usa",
+                // --- City Aliases ---
+                "nyc": "new york city",
+                "dc": "washington, d.c.",
+                "mexico city": "mexico city",
+                "panama city": "panama city"
+            };
+
+            let db, auth, userId, userDocRef, unsubscribe;
+            let usaFeatures, mapFeatures; 
+            let cityFeatures; 
+            let urbanFeatures; // NEW: Urban Areas
+            let selectedRegionId = null;
+            let selectedRegionName = null;
+
+            // Local data cache
+            const data = {
+                visitedCountries: [],
+                wishlistCountries: [],
+                visitedStates: [],
+                wishlistStates: [],
+                visitedCities: [],
+                wishlistCities: [],
+                customLocations: [], // Store custom AI-geocoded spots
+                notes: {} 
+            };
+
+            // --- D3 Map Setup ---
+            const svg = d3.select(mapSvg);
+            const g = svg.append("g");
+
+            const projection = d3.geoMercator().scale(150).center([0, 40]);
+            const path = d3.geoPath().projection(projection);
+
+            const zoom = d3.zoom()
+                .scaleExtent([1, 200]) // Increased zoom limit from 18 to 200
+                .on("zoom", zoomed);
+            
+            svg.call(zoom);
+
+            function zoomed(event) {
+                const { transform } = event;
+                g.attr("transform", transform);
+                g.selectAll("path").attr("stroke-width", 1 / transform.k);
+                
+                // --- TIERED SEMANTIC ZOOMING ---
+                const k = transform.k;
+                
+                // Urban Areas Logic (New Geometry)
+                if (urbanFeatures) {
+                    const showUrban = k > 4.5; 
+                    g.selectAll(".urban-area")
+                        .style("opacity", showUrban ? 0.5 : 0);
+                }
+
+                // City Dots Logic
+                g.selectAll(".city")
+                    .attr("r", 3 / k) 
+                    .attr("stroke-width", 0.5 / k)
+                    .style("opacity", d => {
+                        // Custom cities always visible
+                        if (d.properties.source === 'Custom') return 1;
+                        
+                        // Dense US Cities
+                        if (d.properties.source === 'US_Dense') {
+                            return k > 4.5 ? 1 : 0;
+                        }
+                        // Major World Cities (now appearing sooner)
+                        return k > 2.0 ? 1 : 0;
+                    })
+                    .style("pointer-events", d => {
+                        if (d.properties.source === 'Custom') return "all";
+                        const visible = (d.properties.source === 'US_Dense') ? (k > 4.5) : (k > 2.0);
+                        return visible ? "all" : "none";
+                    });
+            }
+
+            // --- Firebase ---
+            function initializeFirebase() {
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+                    const firebaseConfig = JSON.parse(firebaseConfigStr);
+                    
+                    if (!firebaseConfig.apiKey) {
+                        console.error("Firebase config is missing.");
+                        showMessage("App is not configured. Cannot save data.", "error");
+                        return;
+                    }
+
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    
+                    onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            userIdSpan.textContent = userId;
+                            const publicCollectionPath = `artifacts/${appId}/public/data/travel-maps`;
+                            userDocRef = doc(db, publicCollectionPath, userId);
+                            setupFirestoreListener();
+                        } else {
+                            try {
+                                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                                if (token) {
+                                    await signInWithCustomToken(auth, token);
+                                } else {
+                                    await signInAnonymously(auth);
+                                }
+                            } catch (authError) {
+                                console.error("Error signing in:", authError);
+                                showMessage("Authentication failed. Cannot save data.", "error");
+                            }
+                        }
+                    });
+                } catch (error) {
+                    console.error("Error initializing Firebase:", error);
+                    showMessage("Error starting app. Please refresh.", "error");
+                }
+            }
+            
+            initializeFirebase();
+
+            // --- Firestore Data ---
+            function setupFirestoreListener() {
+                if (!userDocRef) return;
+                unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        loadData(docSnap);
+                    } else {
+                        saveData(); 
+                    }
+                }, (error) => {
+                    console.error("Error listening to document:", error);
+                    showMessage("Error loading data.", "error");
+                });
+            }
+
+            function loadData(docSnap) {
+                const docData = docSnap.data();
+                data.visitedCountries = docData.visitedCountries || [];
+                data.wishlistCountries = docData.wishlistCountries || [];
+                data.visitedStates = docData.visitedStates || [];
+                data.wishlistStates = docData.wishlistStates || [];
+                data.visitedCities = docData.visitedCities || []; 
+                data.wishlistCities = docData.wishlistCities || []; 
+                data.customLocations = docData.customLocations || []; // Load custom spots
+                data.notes = docData.notes || {}; 
+                
+                // Re-draw map to include custom cities if they exist
+                if (mapFeatures && cityFeatures) {
+                    drawMap(mapFeatures);
+                }
+                
+                updateMapColors();
+                updateLists();
+                
+                if (selectedRegionName && notesTextarea) {
+                    notesTextarea.value = data.notes[selectedRegionName] || '';
+                }
+            }
+
+            function saveData() {
+                if (!userDocRef) {
+                    console.warn("Cannot save: userDocRef is not set.");
+                    return;
+                }
+                setDoc(userDocRef, data, { merge: true }).catch(error => {
+                    console.error("Error saving data:", error);
+                    showMessage("Error saving data.", "error");
+                });
+            }
+
+            // --- Map Logic ---
+            function getRegionId(name) {
+                if (!mapFeatures) {
+                    showMessage("Map data is still loading.", "warning");
+                    return null;
+                }
+
+                const lowerName = name.toLowerCase().trim();
+                const aliasedName = aliases[lowerName] || lowerName;
+                
+                // Check Regions
+                const feature = mapFeatures.features.find(f => {
+                    const featureName = getRegionName(f).toLowerCase();
+                    return featureName === aliasedName;
+                });
+                if (feature) return getRegionIdFromFeature(feature);
+
+                // Check Existing Cities
+                if (cityFeatures) {
+                    const cityFeature = cityFeatures.features.find(f => {
+                        const p = f.properties;
+                        const cityName = (p.name || p.NAME || p.city || "").toLowerCase();
+                        // Check name match...
+                        let fullCityName = cityName;
+                        if (p.source === 'US_Dense' && p.state) {
+                             fullCityName = `${cityName}, ${p.state}, usa`.toLowerCase();
+                        } else {
+                             const countryName = (p.adm0name || p.ADM0NAME || p.sov0name || "").toLowerCase();
+                             if (countryName) fullCityName = `${cityName}, ${countryName}`;
+                        }
+                        return cityName === aliasedName || fullCityName === aliasedName; 
+                    });
+                    if (cityFeature) return getRegionIdFromFeature(cityFeature);
+                }
+
+                return null; // Not found locally
+            }
+
+            function getRegionName(feature) {
+                const p = feature.properties;
+                if (p.type === 'city') {
+                    let cityName = p.name || p.NAME || p.name_en || p.city || "Unknown City";
+                    let countryName = p.adm0name || p.ADM0NAME || p.sov0name || p.SOV0NAME || "";
+                    if (p.source === 'US_Dense' && p.state) countryName = p.state + ", USA";
+                    if (p.source === 'Custom' && p.country) countryName = p.country;
+
+                    return countryName ? `${cityName}, ${countryName}` : cityName;
+                }
+                return p.name || p.NAME;
+            }
+
+            function getRegionIdFromFeature(feature) {
+                const p = feature.properties;
+                if (p.type === 'city') {
+                    return getRegionName(feature); // Use full name as ID for cities
+                }
+                return feature.id || p.name || p.NAME;
+            }
+
+            function updateLists() {
+                const visitedListDiv = document.getElementById('visited-list');
+                const wishlistListDiv = document.getElementById('wishlist-list');
+                const visitedHeader = document.getElementById('visited-header');
+                const wishlistHeader = document.getElementById('wishlist-header');
+
+                const totalVisited = data.visitedCountries.length + data.visitedStates.length + data.visitedCities.length;
+                const totalWishlist = data.wishlistCountries.length + data.wishlistStates.length + data.wishlistCities.length;
+
+                if (visitedHeader) visitedHeader.textContent = `Visited (${totalVisited})`;
+                if (wishlistHeader) wishlistHeader.textContent = `Wishlist (${totalWishlist})`;
+
+                const renderSection = (list, title) => {
+                    let html = `<h3 class="text-md font-semibold text-gray-400 mb-1">${title} (${list.length})</h3>`;
+                    if (list.length === 0) {
+                        html += `<p class="text-gray-500 text-sm">None added yet.</p>`;
+                    } else {
+                        html += '<div class="flex flex-col">';
+                        list.sort().forEach(item => {
+                            const hasNote = data.notes[item] && data.notes[item].trim() !== "";
+                            const noteIndicator = hasNote ? '<span class="ml-2 text-cyan-500 text-xs" title="Has notes">📝</span>' : '';
+                            html += `<span class="text-gray-300 py-0.5 cursor-pointer hover:text-white" onclick="document.getElementById('country-input').value='${item.replace(/'/g, "\\'")}'; document.getElementById('get-info').click();">${item}${noteIndicator}</span>`;
+                        });
+                        html += '</div>';
+                    }
+                    return html;
+                };
+
+                const renderGrid = (countries, states, cities) => {
+                    return `
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>${renderSection(countries, "Countries")}</div>
+                            <div>${renderSection(states, "States")}</div>
+                            <div>${renderSection(cities, "Cities")}</div>
+                        </div>
+                    `;
+                };
+
+                if (visitedListDiv) visitedListDiv.innerHTML = renderGrid(data.visitedCountries, data.visitedStates, data.visitedCities);
+                if (wishlistListDiv) wishlistListDiv.innerHTML = renderGrid(data.wishlistCountries, data.wishlistStates, data.wishlistCities);
+            }
+
+            function updateMapColors() {
+                // Update Paths (Countries/States)
+                g.selectAll("path:not(.urban-area)")
+                    .attr("fill", d => {
+                        const name = getRegionName(d);
+                        if (name === selectedRegionName) return '#2563EB'; 
+                        if (data.visitedCountries.includes(name) || data.visitedStates.includes(name)) return '#16A34A'; 
+                        if (data.wishlistCountries.includes(name) || data.wishlistStates.includes(name)) return '#D97706'; 
+                        return '#4B5563'; 
+                    });
+
+                // Update Cities
+                g.selectAll(".city")
+                    .attr("fill", d => {
+                        const name = getRegionName(d);
+                        if (name === selectedRegionName) return '#2563EB'; 
+                        if (data.visitedCities.includes(name)) return '#16A34A'; 
+                        if (data.wishlistCities.includes(name)) return '#D97706'; 
+                        return '#ffffff'; 
+                    })
+                    .attr("stroke", d => {
+                         const name = getRegionName(d);
+                         if (name === selectedRegionName) return '#ffffff';
+                         return '#000000';
+                    });
+            }
+
+            function showNotesPanel(locationName) {
+                if (!locationName) return;
+                selectedRegionName = locationName;
+                countryInput.value = locationName; 
+                notesPanel.classList.remove('hidden');
+                notesTitle.textContent = `Personal Notes: ${locationName}`;
+                if (notesTextarea) {
+                    notesTextarea.value = data.notes[locationName] || '';
+                }
+                updateMapColors();
+            }
+
+            function handleRegionClick(event, d) {
+                if(d.properties.type === 'city') event.stopPropagation();
+                const name = getRegionName(d);
+                const id = getRegionIdFromFeature(d);
+                selectedRegionId = id;
+                showNotesPanel(name);
+            }
+
+            // --- AI Geocoding for Missing Cities ---
+            async function findAndAddCustomCity(name, type) {
+                showMessage(`Searching for "${name}"...`, 'info');
+                
+                const systemPrompt = `You are a geocoding assistant. Return ONLY a JSON object with coordinates for the city. Format: {"lat": number, "lng": number, "name": "City Name", "country": "Country Name"}. If not found, return {"error": "not found"}.`;
+                const userQuery = `Get coordinates for city: ${name}`;
+                
+                const result = await getGeminiResponse(systemPrompt, userQuery);
+                
+                if (result && !result.error && result.lat) {
+                    // Add to custom locations
+                    const customCity = {
+                        type: "Feature",
+                        id: `custom_${Date.now()}`,
+                        properties: {
+                            name: result.name,
+                            country: result.country,
+                            type: 'city',
+                            source: 'Custom'
+                        },
+                        geometry: {
+                            type: "Point",
+                            coordinates: [result.lng, result.lat]
+                        }
+                    };
+                    
+                    // Save to persistent data
+                    data.customLocations.push(customCity);
+                    
+                    // Add to runtime map data
+                    if (cityFeatures) {
+                        cityFeatures.features.push(customCity);
+                        drawMap(mapFeatures); // Redraw to show new dot
+                    }
+                    
+                    // Add to list
+                    const fullName = `${result.name}, ${result.country}`;
+                    const list = (type === 'visited') ? data.visitedCities : data.wishlistCities;
+                    const otherList = (type === 'visited') ? data.wishlistCities : data.visitedCities;
+                    
+                    if (!list.includes(fullName)) list.push(fullName);
+                    const idx = otherList.indexOf(fullName);
+                    if (idx > -1) otherList.splice(idx, 1);
+                    
+                    saveData();
+                    updateLists();
+                    showNotesPanel(fullName);
+                    
+                    // Zoom to it
+                    const t = d3.zoomIdentity.translate(window.innerWidth/2, window.innerHeight/2).scale(8).translate(-projection([result.lng, result.lat])[0], -projection([result.lng, result.lat])[1]);
+                    svg.transition().duration(1500).call(zoom.transform, t);
+                    
+                    showMessage(`Found and added ${fullName}!`, 'success');
+                    
+                } else {
+                    showMessage(`Could not find location "${name}".`, 'error');
+                }
+            }
+
+            // Helper just for getting JSON from Gemini
+            async function getGeminiResponse(sys, user) {
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: user }] }],
+                            systemInstruction: { parts: [{ text: sys }] },
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+                    const json = await response.json();
+                    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+                    return text ? JSON.parse(text) : null;
+                } catch (e) {
+                    console.error("Geocoding error:", e);
+                    return null;
+                }
+            }
+
+            function addRegion(type) {
+                const name = countryInput.value.trim();
+                if (!name) {
+                    showMessage("Please enter a location name.", 'warning');
+                    return;
+                }
+
+                const id = getRegionId(name);
+                
+                // If ID not found, try AI Geocoding
+                if (!id) {
+                    findAndAddCustomCity(name, type);
+                    return;
+                }
+                
+                let canonicalName, featureType;
+                
+                let feature = mapFeatures.features.find(f => getRegionIdFromFeature(f) === id);
+                if (feature) {
+                    canonicalName = getRegionName(feature);
+                    featureType = feature.properties.type;
+                } else {
+                    feature = cityFeatures.features.find(f => getRegionIdFromFeature(f) === id);
+                    if (feature) {
+                        canonicalName = getRegionName(feature);
+                        featureType = 'city';
+                    }
+                }
+
+                let listToAdd, otherList;
+                if (featureType === 'state') {
+                    listToAdd = (type === 'visited') ? data.visitedStates : data.wishlistStates;
+                    otherList = (type === 'visited') ? data.wishlistStates : data.visitedStates;
+                } else if (featureType === 'city') {
+                    listToAdd = (type === 'visited') ? data.visitedCities : data.wishlistCities;
+                    otherList = (type === 'visited') ? data.wishlistCities : data.visitedCities;
+                } else { 
+                    listToAdd = (type === 'visited') ? data.visitedCountries : data.wishlistCountries;
+                    otherList = (type === 'visited') ? data.wishlistCountries : data.visitedCountries;
+                }
+
+                const indexInOther = otherList.indexOf(canonicalName);
+                if (indexInOther > -1) otherList.splice(indexInOther, 1);
+
+                if (!listToAdd.includes(canonicalName)) {
+                    listToAdd.push(canonicalName);
+                }
+                
+                saveData();
+                updateLists();
+                showNotesPanel(canonicalName);
+                showMessage(`Added ${canonicalName} to ${type}!`, 'success');
+            }
+
+            function removeRegion() {
+                const name = countryInput.value.trim();
+                if (!name) return;
+                let found = false;
+                [data.visitedCountries, data.wishlistCountries, data.visitedStates, data.wishlistStates, data.visitedCities, data.wishlistCities].forEach(list => {
+                    const index = list.indexOf(name);
+                    if (index > -1) { list.splice(index, 1); found = true; }
+                });
+                if (found) {
+                    if (selectedRegionName === name) { selectedRegionName = null; countryInput.value = ''; notesPanel.classList.add('hidden'); }
+                    updateMapColors(); updateLists(); saveData(); showMessage(`Removed ${name}.`, 'info');
+                } else {
+                    showMessage(`Could not find ${name} in your lists.`, 'error');
+                }
+            }
+
+            function resetView() {
+                const features = mapFeatures;
+                let t = d3.zoomIdentity;
+                if (features) {
+                    const b = path.bounds(features);
+                    const b_width = b[1][0] - b[0][0];
+                    const b_height = b[1][1] - b[0][1];
+                    const b_center = [ (b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2 ];
+                    const svgBounds = mapSvg.getBoundingClientRect();
+                    const scale = 0.9 / Math.max( b_width / svgBounds.width, b_height / svgBounds.height );
+                    const translate = [ svgBounds.width / 2 - scale * b_center[0], svgBounds.height / 2 - scale * b_center[1] ];
+                    t = d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale);
+                }
+                svg.transition().duration(750).call(zoom.transform, t);
+            }
+
+            function drawMap(features) {
+                if (!features) return; 
+
+                // --- Urban Areas ---
+                if (urbanFeatures) {
+                    g.selectAll(".urban-area").remove();
+                    g.selectAll(".urban-area")
+                        .data(urbanFeatures.features)
+                        .enter().append("path")
+                        .attr("class", "urban-area")
+                        .attr("d", path)
+                        .style("opacity", 0); 
+                }
+
+                // --- Geography ---
+                g.selectAll(".country").remove(); 
+                g.selectAll("path:not(.urban-area)").remove();
+
+                g.selectAll(".country")
+                    .data(features.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", path)
+                    .attr("fill", "#4B5563") 
+                    .attr("stroke", "#111827") 
+                    .attr("stroke-width", 0.5)
+                    .on("click", handleRegionClick)
+                    .append("title") 
+                    .text(d => getRegionName(d));
+                
+                // --- Cities ---
+                if (cityFeatures) {
+                    g.selectAll(".city").remove();
+                    
+                    const validCities = cityFeatures.features.filter(f => f.geometry && f.geometry.coordinates);
+
+                    validCities.forEach(f => {
+                        f.properties.type = 'city';
+                        const name = f.properties.NAME || f.properties.name || f.properties.city;
+                        if (name === 'New York') f.properties.name = 'New York City';
+                        else if (name === 'Washington') f.properties.name = 'Washington, D.C.';
+                        else if (name === 'Mexico') f.properties.name = 'Mexico City';
+                        else f.properties.name = name; 
+                    });
+
+                    g.selectAll(".city")
+                        .data(validCities)
+                        .enter().append("circle")
+                        .attr("class", "city")
+                        .attr("cx", d => projection(d.geometry.coordinates)[0])
+                        .attr("cy", d => projection(d.geometry.coordinates)[1])
+                        .attr("r", 2) 
+                        .attr("fill", "#ffffff") 
+                        .attr("stroke", "#000000")
+                        .attr("stroke-width", 0.5)
+                        .style("opacity", 0) 
+                        .style("pointer-events", "none") 
+                        .on("click", handleRegionClick)
+                        .append("title")
+                        .text(d => getRegionName(d));
+                }
+
+                updateMapColors();
+            }
+
+            function generateItinerary() {
+                // --- NEW: Use the destinations input as the primary location string ---
+                const location = itineraryDestinationsInput.value || infoTitle.textContent;
+                // --- NEW: Get start location ---
+                const startLocation = document.getElementById('start-location').value || "Phoenix (PHX)";
+                
+                const startDate = startDateInput.value;
+                const endDate = endDateInput.value;
+                
+                const transportMode = document.getElementById('transport-mode').value;
+                const tripType = document.querySelector('input[name="trip-type"]:checked').value;
+                const transportBudget = document.querySelector('input[name="transport-budget"]:checked').value;
+                
+                const accommodationType = document.getElementById('accommodation-type').value;
+                const accommodationBudget = document.querySelector('input[name="accommodation-budget"]:checked').value;
+                
+                const foodBudget = document.querySelector('input[name="food-budget"]:checked').value;
+                const otherBudget = document.querySelector('input[name="other-budget"]:checked').value;
+
+                if (!location || !startDate || !endDate) {
+                    showMessage("Please set a location, start date, and end date.", 'warning');
+                    return;
+                }
+                
+                const systemPrompt = `You are a detailed travel planner.
+1.  **Destinations:** The user's trip covers: "${location}".
+    * If multiple locations are listed, create a sequential itinerary that splits the time between them.
+    * If a single location is listed, plan for that one place.
+2.  **Crucial First Step:** Use your search tool to find official travel.state.gov information for the country/countries involved.
+3.  **Format:** Create a response in Markdown.
+4.  **User Budget Preferences:**
+    * Transport: ${transportMode} (${tripType}, ${transportBudget} Budget)
+    * Accommodation: ${accommodationType} (${accommodationBudget} Budget)
+    * Food Budget: ${foodBudget}
+    * Other Expenses: ${otherBudget}
+5.  **Content:**
+    * **Pre-Trip Briefing:** Health, Safety, Logistics, Culture, Weather for the destinations.
+    * **Official Info:** Currency, Embassy, Visa (from state.gov) for relevant countries.
+    * **Itinerary:** Day-by-day plan. If multiple cities, include travel logic between them. Lodging recommendations must be specific to '${accommodationType}' matching '${accommodationBudget}'.
+    * **Transport:** Add a section titled "### Transport Options (${transportMode} - ${tripType})". Provide example ${tripType.toLowerCase()} ${transportMode.toLowerCase()} information starting from **${startLocation}** to the first destination (and return from the last), matching the '${transportBudget}' budget.
+    * **Cost:** Estimated total cost section summarizing all expenses.`;
+                
+                const userQuery = `Create a travel itinerary for ${location} starting from ${startLocation}, covering dates ${startDate} to ${endDate}. 
+Preferences:
+- Transport: ${transportMode} (${tripType}, ${transportBudget} budget)
+- Accommodation: ${accommodationType} (${accommodationBudget} budget)
+- Food Budget: ${foodBudget}
+- Other Expenses: ${otherBudget}
+Include a pre-trip briefing, official travel.state.gov info, a multi-destination day-by-day itinerary if applicable, ${tripType} ${transportMode} examples from ${startLocation}, and an estimated total cost.`;
+
+                itineraryLoading.classList.remove('hidden');
+                itineraryContent.innerHTML = '';
+
+                callGeminiAPI(systemPrompt, userQuery, {
+                    loadingEl: itineraryLoading,
+                    contentEl: itineraryContent,
+                    errorEl: null, 
+                    sourcesEl: null, 
+                    parseMarkdown: true
+                });
+            }
+
+            // --- RESTORED: showInfoPanel ---
+            function showInfoPanel(location) {
+                showNotesPanel(location);
+                infoPanel.classList.remove('hidden');
+                itineraryPanel.classList.remove('hidden'); // Show itinerary panel as well
+                itineraryContent.innerHTML = ''; 
+                infoTitle.textContent = location;
+                
+                // --- NEW: Pre-fill the destinations input ---
+                itineraryDestinationsInput.value = location;
+                
+                infoLoading.classList.remove('hidden');
+                infoContent.textContent = '';
+                infoError.classList.add('hidden');
+                infoSources.innerHTML = '';
+
+                const systemPrompt = "You are a travel expert. Provide a concise, 1-paragraph summary for a traveler about the location. Highlight key attractions or experiences.";
+                const userQuery = `Location: ${location}`;
+
+                callGeminiAPI(systemPrompt, userQuery, {
+                    loadingEl: infoLoading,
+                    contentEl: infoContent,
+                    errorEl: infoError,
+                    sourcesEl: infoSources,
+                    parseMarkdown: false
+                }).then(() => {
+                    // Set default dates
+                    const today = new Date().toISOString().split('T')[0];
+                    const oneWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                    startDateInput.value = today;
+                    endDateInput.value = oneWeek;
+                });
+            }
+
+            // --- Event Listeners ---
+            if (saveNoteBtn) {
+                saveNoteBtn.addEventListener('click', () => {
+                    if (selectedRegionName) {
+                        const note = notesTextarea.value;
+                        data.notes[selectedRegionName] = note;
+                        saveData();
+                        showMessage(`Note for ${selectedRegionName} saved!`, 'success');
+                        updateLists(); 
+                    } else {
+                        showMessage("No location selected.", 'warning');
+                    }
+                });
+            }
+
+            // Map Loading
+            const worldUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+            const usaUrl = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
+            // --- Updated Cities URL to CDN ---
+            const citiesUrl = "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector/geojson/ne_10m_populated_places_simple.geojson";
+            const usCitiesDenseUrl = "https://gist.githubusercontent.com/Miserlou/c5cd8364bf9b2420bb29/raw/2bf258763cdddd704f8ffd3ea9a3e81d25e2c6f6/cities.json";
+            // const urbanUrl = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_urban_areas.geojson"; // Commented out to prevent 403
+
+            Promise.all([
+                d3.json(worldUrl),
+                d3.json(usaUrl),
+                d3.json(citiesUrl),
+                fetch(usCitiesDenseUrl).then(response => response.json()),
+                // d3.json(urbanUrl) 
+            ]).then(([worldData, usaData, citiesData, usCitiesArray]) => {
+                const worldFeaturesCollection = topojson.feature(worldData, worldData.objects.countries);
+                usaFeatures = topojson.feature(usaData, usaData.objects.states); 
+                urbanFeatures = null; 
+
+                // Convert US Array to GeoJSON Features
+                const usDenseFeatures = usCitiesArray.map((city, index) => ({
+                    type: "Feature",
+                    id: `us_city_${index}`,
+                    properties: {
+                        name: city.city,
+                        city: city.city,
+                        state: city.state,
+                        type: 'city',
+                        source: 'US_Dense'
+                    },
+                    geometry: {
+                        type: "Point",
+                        coordinates: [city.longitude, city.latitude]
+                    }
+                }));
+
+                // Combine World Cities + US Dense Cities + Custom
+                cityFeatures = {
+                    type: "FeatureCollection",
+                    features: citiesData.features.concat(usDenseFeatures).concat(data.customLocations || [])
+                };
+
+                const worldFeaturesWithType = worldFeaturesCollection.features.map(f => {
+                    const name = f.properties.name || f.properties.NAME;
+                    if (name === 'United States of America') f.properties.name = 'UnitedStates of America'; 
+                    f.properties.type = 'country';
+                    return f;
+                });
+                
+                const usaFeaturesWithType = usaFeatures.features.map(f => {
+                    f.properties.type = 'state';
+                    if (f.properties.name === 'Georgia') {
+                        f.properties.name = 'Georgia, USA';
+                    }
+                    return f;
+                });
+
+                const filteredWorldFeatures = worldFeaturesWithType.filter(f => {
+                    return f.properties.name !== 'UnitedStates of America';
+                });
+
+                mapFeatures = { 
+                    type: "FeatureCollection", 
+                    features: filteredWorldFeatures.concat(usaFeaturesWithType) 
+                };
+                
+                drawMap(mapFeatures); 
+                resetView(); 
+                
+            }).catch(err => {
+                console.error("Error loading map data:", err);
+                showMessage("Failed to load map data. Please refresh.", "error");
+            });
+
+            document.getElementById('add-visited').onclick = () => addRegion('visited');
+            document.getElementById('add-wishlist').onclick = () => addRegion('wishlist');
+            document.getElementById('remove-region').onclick = removeRegion;
+            document.getElementById('reset-view').onclick = resetView;
+            
+            document.getElementById('get-info').onclick = () => {
+                const location = countryInput.value;
+                if (location) {
+                    showInfoPanel(location);
+                } else {
+                    showMessage("Please enter a location name first.", 'warning');
+                }
+            };
+            
+            // Ensure generateItinerary is defined before this assignment
+            document.getElementById('generate-itinerary').onclick = generateItinerary;
+
+            window.onresize = () => {
+                // Future resize logic can go here
+            };
+
+            // --- Helper Functions ---
+            
+            async function callGeminiAPI(systemPrompt, userQuery, {
+                loadingEl,
+                contentEl,
+                errorEl,
+                sourcesEl,
+                parseMarkdown = false
+            }) {
+                if (errorEl) errorEl.classList.add('hidden');
+                if (loadingEl) loadingEl.classList.remove('hidden');
+                if (contentEl) contentEl.innerHTML = '';
+                if (sourcesEl) sourcesEl.innerHTML = '';
+
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    tools: [{ "google_search": {} }], 
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                };
+
+                let result;
+                let retries = 3;
+                let delay = 1000;
+
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            if (response.status >= 400 && response.status < 500) {
+                                console.error(`API Error: ${response.statusText}`, await response.text());
+                                throw new Error(`API Error: ${response.status} ${response.statusText}. Check your prompt or API key.`);
+                            }
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
+                        result = await response.json();
+                        break; 
+                        
+                    } catch (error) {
+                        console.error(`API call attempt ${i + 1} failed:`, error.message);
+                        if (i === retries - 1) {
+                            if (loadingEl) loadingEl.classList.add('hidden');
+                            if (errorEl) {
+                                errorEl.textContent = "Error fetching data after multiple attempts. Please try again.";
+                                errorEl.classList.remove('hidden');
+                            }
+                            return; 
+                        }
+                        await new Promise(res => setTimeout(res, delay));
+                        delay *= 2; 
+                    }
+                }
+
+                if (loadingEl) loadingEl.classList.add('hidden');
+                
+                const candidate = result.candidates?.[0];
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    const text = candidate.content.parts[0].text;
+                    
+                    if (parseMarkdown) {
+                        contentEl.innerHTML = md.render(text);
+                    } else {
+                        contentEl.textContent = text;
+                    }
+
+                    if (sourcesEl) {
+                        sourcesEl.innerHTML = ''; 
+                        const groundingMetadata = candidate.groundingMetadata;
+                        if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                            const sources = groundingMetadata.groundingAttributions
+                                .map(attribution => ({
+                                    uri: attribution.web?.uri,
+                                    title: attribution.web?.title,
+                                }))
+                                .filter(source => source.uri && source.title); 
+                            
+                            if (sources.length > 0) {
+                                const p = document.createElement('p');
+                                p.className = 'text-sm font-bold mt-2 text-gray-400';
+                                p.textContent = 'Sources:';
+                                sourcesEl.appendChild(p);
+                                const ul = document.createElement('ul');
+                                ul.className = 'list-disc list-inside text-sm';
+                                sources.forEach(source => {
+                                    const li = document.createElement('li');
+                                    const a = document.createElement('a');
+                                    a.href = source.uri;
+                                    a.textContent = source.title;
+                                    a.target = '_blank'; 
+                                    a.rel = 'noopener noreferrer'; 
+                                    a.className = 'text-cyan-400 hover:text-cyan-300 underline';
+                                    li.appendChild(a);
+                                    ul.appendChild(li);
+                                });
+                                sourcesEl.appendChild(ul);
+                            }
+                        }
+                    }
+                } else {
+                    if (errorEl) {
+                        errorEl.textContent = "Could not parse response from AI.";
+                        errorEl.classList.remove('hidden');
+                    }
+                    console.error("Invalid response structure:", result);
+                }
+            }
+
+            function showMessage(text, type = 'info') {
+                messageBox.textContent = text;
+                messageBox.classList.remove('hidden', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-red-500');
+                
+                let colorClass = 'bg-blue-500'; 
+                if (type === 'success') colorClass = 'bg-green-500';
+                if (type === 'warning') colorClass = 'bg-yellow-500';
+                if (type === 'error') colorClass = 'bg-red-500';
+                
+                messageBox.classList.add(colorClass);
+                messageBox.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    messageBox.classList.add('hidden');
+                }, 3000);
+            }
+        });
+    </script>
+</body>
+</html>
